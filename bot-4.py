@@ -1,6 +1,8 @@
 import telebot
 import httpx
 import threading
+from io import BytesIO
+from gtts import gTTS
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
@@ -13,6 +15,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 user_states = {}
 WAITING_PROMPT = "waiting_prompt"
 WAITING_IMAGE  = "waiting_image"
+WAITING_TTS    = "waiting_tts"
 
 # ─── NSFW FILTER ──────────────────────────────────────────────────────────────
 NSFW_KEYWORDS = [
@@ -35,6 +38,7 @@ def main_kb():
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("🎨 Click to Make It", callback_data="make_image"))
     kb.add(InlineKeyboardButton("🔍 AI Check", callback_data="ai_check"))
+    kb.add(InlineKeyboardButton("🔊 Text to Voice", callback_data="text_to_voice"))
     kb.row(
         InlineKeyboardButton("ℹ️ About", callback_data="about"),
         InlineKeyboardButton("🆘 Help", callback_data="help")
@@ -121,6 +125,17 @@ def handle_callbacks(call):
             reply_markup=back_kb()
         )
 
+    elif call.data == "text_to_voice":
+        user_states[chat_id] = WAITING_TTS
+        bot.edit_message_text(
+            "🔊 *Text to Voice*\n\n"
+            "✍️ Jo text aap voice me convert karna chahte ho, woh bhejo.\n\n"
+            "_Example: Hello, welcome to my Telegram bot!_",
+            chat_id, msg_id,
+            parse_mode="Markdown",
+            reply_markup=back_kb()
+        )
+
     elif call.data == "about":
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("🔙 Back to Menu", callback_data="back_menu"))
@@ -148,6 +163,8 @@ def handle_callbacks(call):
             "  → Text likho, AI image banega\n\n"
             "🔍 *AI Check*\n"
             "  → Photo bhejo, AI % batayega\n\n"
+            "🔊 *Text to Voice*\n"
+            "  → Text bhejo, voice note milega\n\n"
             "🛡️ *18+ Content*\n"
             "  → Automatically blocked\n\n"
             "━━━━━━━━━━━━━━━━━\n"
@@ -251,6 +268,49 @@ def handle_messages(message):
                 bot.edit_message_text("❌ *Analysis fail ho gayi!*\n\nDobara try karo.", chat_id, msg.message_id, parse_mode="Markdown", reply_markup=main_kb())
 
         threading.Thread(target=check).start()
+
+    # Text to voice
+    elif state == WAITING_TTS and message.content_type == "text":
+        text_to_convert = message.text.strip()
+        user_states.pop(chat_id, None)
+
+        if not text_to_convert:
+            bot.send_message(
+                chat_id,
+                "⚠️ *Text empty hai.*\n\nPlease kuch text bhejo.",
+                parse_mode="Markdown",
+                reply_markup=main_kb()
+            )
+            return
+
+        msg = bot.send_message(chat_id, "🔊 *Converting text to voice...*", parse_mode="Markdown")
+
+        def make_voice():
+            try:
+                tts = gTTS(text=text_to_convert, lang="en")
+                audio_file = BytesIO()
+                tts.write_to_fp(audio_file)
+                audio_file.seek(0)
+                audio_file.name = "voice.mp3"
+
+                bot.delete_message(chat_id, msg.message_id)
+                bot.send_audio(
+                    chat_id,
+                    audio=audio_file,
+                    caption="✅ *Voice Ready!*",
+                    parse_mode="Markdown",
+                    reply_markup=main_kb()
+                )
+            except Exception:
+                bot.edit_message_text(
+                    "❌ *Voice generate nahi ho payi.*\n\nDobara try karo!",
+                    chat_id,
+                    msg.message_id,
+                    parse_mode="Markdown",
+                    reply_markup=main_kb()
+                )
+
+        threading.Thread(target=make_voice).start()
 
     else:
         bot.send_message(
